@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAAUN University FAQ Chatbot</title>
+
+<script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2/dist/fuse.min.js"></script>
+
+<style>
+html,body{
+  margin:0;
+  padding:0;
+  height:100%;
+  font-family:Segoe UI, sans-serif;
+  background:#f0f2f5;
+}
+body.dark-mode{background:#121212;color:#eee;}
+
+.chat-container{
+  display:flex;
+  flex-direction:column;
+  height:90vh;
+  max-width:700px;
+  margin:auto;
+  background:#fff;
+  border-radius:20px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.2);
+  overflow:hidden;
+}
+body.dark-mode .chat-container{background:#1e1e1e;}
+
+.chat-header{
+  padding:18px;
+  background:linear-gradient(90deg,#4b6cf7,#5fa3f7);
+  color:#fff;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.chat-header button{
+  border:none;
+  padding:8px 14px;
+  border-radius:10px;
+  cursor:pointer;
+}
+
+.chat-box{
+  flex:1;
+  padding:20px 20px 80px 20px; /* bottom padding for floating input */
+  overflow-y:auto;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.bot-message,.user-message{
+  padding:12px 18px;
+  border-radius:20px;
+  max-width:80%;
+  word-wrap:break-word;
+  box-shadow:0 4px 10px rgba(0,0,0,0.1);
+}
+
+.bot-message{background:#e0e0e0;}
+body.dark-mode .bot-message{background:#2c2c2c;color:#eee;}
+
+.user-message{
+  background:#4b6cf7;
+  color:#fff;
+  align-self:flex-end;
+}
+
+.faq-container{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  padding:66px;
+  border-top:1px solid #ddd;
+  background:#f7f7f7;
+}
+body.dark-mode .faq-container{background:#222;}
+
+.faq-container button{
+  flex:1 1 48%; /* 2 per row */
+  padding:10px;
+  border:none;
+  border-radius:15px;
+  background:#4b6cf7;
+  color:#fff;
+  cursor:pointer;
+  text-align:center;
+}
+
+.chat-input-container{
+  position:fixed;
+  bottom:10px;
+  left:50%;
+  transform:translateX(-50%);
+  width:95%;
+  max-width:700px;
+  display:flex;
+  background:#fff;
+  border-radius:50px;
+  box-shadow:0 5px 15px rgba(0,0,0,0.15);
+  overflow:hidden;
+  z-index:100;
+}
+body.dark-mode .chat-input-container{background:#1e1e1e;}
+
+.chat-input-container input{
+  flex:1;
+  padding:15px 20px;
+  border:none;
+  outline:none;
+  border-radius:50px;
+  font-size:16px;
+}
+.chat-input-container button{
+  background:#4b6cf7;
+  color:#fff;
+  border:none;
+  padding:0 20px;
+  cursor:pointer;
+  font-size:16px;
+  border-radius:0 50px 50px 0;
+}
+
+.typing::after{
+  content:"...";
+  animation:blink 1.2s infinite;
+}
+@keyframes blink{
+  0%{opacity:0}
+  50%{opacity:1}
+  100%{opacity:0}
+}
+
+table{
+  border-collapse:collapse;
+  width:100%;
+  font-size:14px;
+}
+th,td{
+  border:1px solid #ccc;
+  padding:8px;
+  text-align:center;
+}
+th{
+  background:#4b6cf7;
+  color:#fff;
+}
+</style>
+</head>
+
+<body>
+
+<div class="chat-container">
+
+<div class="chat-header">
+<img src="logo.jpg" width="50" height="50"><h3>MAAUN University FAQ Chatbot</h3>
+<button onclick="toggleMode()">Dark Mode</button>
+</div>
+
+<div id="chat" class="chat-box"></div>
+
+<div id="faqButtons" class="faq-container"></div>
+
+<div class="chat-input-container">
+<input id="userInput" placeholder="Type question...">
+<button onclick="sendMessage()">Send</button>
+</div>
+
+</div>
+
+<script>
+
+/* DARK MODE */
+function toggleMode(){
+  document.body.classList.toggle("dark-mode");
+}
+
+/* RANDOM USER ID */
+let userId = localStorage.getItem("chatUserId");
+if(!userId){
+  userId = "user_"+Math.random().toString(36).substring(2,10);
+  localStorage.setItem("chatUserId",userId);
+}
+
+/* CHAT STORAGE */
+function saveChat(){
+  const messages = Array.from(document.querySelectorAll(".chat-box > div"))
+                      .map(div=>({text:div.innerHTML,cls:div.className}));
+  localStorage.setItem("chatMessages_"+userId,JSON.stringify({time:Date.now(),messages}));
+}
+
+function loadChat(){
+  const data = JSON.parse(localStorage.getItem("chatMessages_"+userId) || "{}");
+  if(data.messages && (Date.now() - data.time < 2*60*60*1000)){ // 2 hours
+    data.messages.forEach(msg=>{
+      addMessage(msg.text,msg.cls,false);
+    });
+  } else {
+    addMessage("Hello 👋 Ask about school fees, courses, or admission.","bot-message",false);
+  }
+}
+
+/* ===== FAQ BUTTON QUESTIONS (VISIBLE) ===== */
+const faqButtonsData=[
+{question:"School fees",answer:"fees"},
+{question:"Apply for admission",answer:"Fill the online form, Upload documents, Pay application fee, Submit and wait for response"}
+
+];
+
+/* ===== HIDDEN QUESTIONS (TYPED ONLY, NO BUTTON) ===== */
+const hiddenFaqs=[
+{question:"nursing",answer:"Nursing science"},
+{question:"Health science",answer:"Bsc medical laboratory science (MBLs),  Doctor of physiotherapy (DPT),  Bsc Public health"},
+{question:"Computing",answer:"School of computing: Bsc cyber security,  Bsc computer science,  Bsc information technology,  Bsc software engineering, information systems,  Bsc data science"},
+{question:"law",answer:"LL.B LAW"},
+{question:"social and management science",answer:"Bsc Accounting,  Bsc Business Administration,  Bsc Human resources Management, Bsc Mass communication,  Bsc Banking and finance,  Bsc Economics,  Bsc peace and conflict resolution,  Bsc international relations"},
+{question:"Medicine",answer:"Bachelor of medicine,   Bachelor of surgery"},
+{question:"Environmental science",answer:"Bsc Architecture,  Bsc. quantity survey"},
+{question:"Does maaun offer postgraduate program?",answer:"Yes they offer:  MSc, Phd"},
+{question:"How long are the degree programs",answer:"Bachelor degree: 4-6 years,  Postgradute: 1-2 years"},
+{question:"what are the entry requirement for the university",answer:"At least 5 credit including Mathematics and english"},
+{question:"Does maaun offer postgraduate program?",answer:"Yes they offer:  MSc, Phd"},
+{question:"How do i check my admission status?",answer:"Log in to the official admission portal using your credentails and check your status"},
+{question:"Does maaun offer postgraduate program?",answer:"Yes they offer:  MSc, Phd"},
+{question:"Do i need WAEC or Neco to apply?",answer:"Yes O-level(WAEC/NECO) is required"},
+{question:"Do i need Jamb apply?",answer:"Yes Jamb required"},
+{question:"Hello",answer:"hey"},
+{question:"hello",answer:"hi"},
+{question:"hi",answer:"hello"},
+{question:"hey",answer:"hi"},
+{question:"How are you",answer:"Im doing great. Thanks for Asking how about you?"},
+{question:"fine",answer:"alright glad. how can i help you"},
+{question:"what is your name",answer:"im your university assistant chatbot"},
+{question:"who made you develop,answer",answer:"i was developed by Aliyu yunus muhammad to help student with information and support"},
+{question:"ok alright okay kk great",answer:"yh"},
+{question:"bye",answer:"goodbye"},
+{question:"good morning",answer:"good morning how was your night"},
+{question:"good night",answer:"sleep well"},
+{question:"thank you",answer:"youre welcome"},
+{question:"i am bored",answer:"maybe try going for a walk "},
+{question:"location",answer:"School is located at kano"},
+{question:"history about",answer:"Maryam abacha american university of nigeria MAAUN is a private university located at kano. The university was founded in 2021 by professor Adamu Abubakar Gwarzo. It was created inresponses to nigerian goverment call for private sector to help expand access to higher education in the country"},
+{question:"contact phone number",answer:"+2348023658213,  +2348023170586"},
+{question:"portal link",answer:"maaun.edu.ng"},
+{question:"president",answer:"Prof. (Dr.) Mohammad Israr"},
+{question:"founder",answer:"Prof Adamu abubakar gwarzo"},
+{question:"reslut",answer:"check your result at student portal"},
+{question:"hard",answer:"hhh no if your seriour with your studys"},
+{question:"sport",answer:"football, basketball, tabletennis, gym "},
+{question:"exam test",answer:"check the school calender"},
+{question:"What courses are offered at MAAUN?",answer:"ENTER THE DEPARTMENT NAME IN THE SEARCH BOX TO VIEW THE COURSES AVAILABLE IN THE DEPARTMANT....eg computing,  nursing,  health sciences,  social management sciences,  law,  medicine,  environmental science"},
+{question:"Does MAAUN accept international student?",answer:"Yes MAAUN accept student woldwide"}
+
+
+];
+
+/* COMBINE BOTH FOR SEARCH */
+const fuse=new Fuse([...faqButtonsData,...hiddenFaqs],{
+  keys:["question"],
+  threshold:0.4
+});
+
+/* SCHOOL FEES TABLE */
+const schoolFeesTable=`
+<div style="overflow-x:auto;">
+<table>
+<thead>
+<tr>
+<th>School</th>
+<th>Application</th>
+<th>Tuition</th>
+<th>Medical</th>
+<th>Matriculation</th>
+</tr>
+</thead>
+<tbody>
+<tr><td>Health Sciences</td><td>50,000</td><td>1,602,000</td><td>50,000</td><td>50,000</td></tr>
+<tr><td>Nursing Sciences</td><td>50,000</td><td>1,602,000</td><td>50,000</td><td>50,000</td></tr>
+<tr><td>School of Computing</td><td>50,000</td><td>1,602,000</td><td>50,000</td><td>50,000</td></tr>
+<tr><td>Social & Management</td><td>50,000</td><td>1,472,000</td><td>50,000</td><td>50,000</td></tr>
+<tr><td>School of Law</td><td>50,000</td><td>1,920,000</td><td>50,000</td><td>50,000</td></tr>
+<tr><td>Medicine & Surgery</td><td>50,000</td><td>5,600,000</td><td>50,000</td><td>50,000</td></tr>
+<tr><td>Environmental (Architecture)</td><td>50,000</td><td>2,100,000</td><td>50,000</td><td>50,000</td></tr>
+<tr><td>Environmental (Quantity Survey)</td><td>50,000</td><td>1,602,000</td><td>50,000</td><td>50,000</td></tr>
+</tbody>
+</table>
+</div>`;
+
+/* CHAT */
+const chatBox=document.getElementById("chat");
+const userInput=document.getElementById("userInput");
+const faqButtons=document.getElementById("faqButtons");
+
+function addMessage(text,cls,save=true){
+  const div=document.createElement("div");
+  div.className=cls;
+  div.innerHTML=text;
+  chatBox.appendChild(div);
+  chatBox.scrollTop=chatBox.scrollHeight;
+  if(save) saveChat();
+}
+
+function typingEffect(callback){
+  const typing=document.createElement("div");
+  typing.className="bot-message typing";
+  typing.textContent="Typing";
+  chatBox.appendChild(typing);
+  chatBox.scrollTop=chatBox.scrollHeight;
+  setTimeout(()=>{typing.remove();callback();},800);
+}
+
+/* SEND MESSAGE */
+function sendMessage(textFromBtn=null){
+  const text=textFromBtn || userInput.value.trim();
+  if(!text) return;
+
+  addMessage(text,"user-message");
+  userInput.value="";
+
+  const lower=text.toLowerCase();
+
+  /* FEES TABLE */
+  if(lower.includes("fees")){
+    typingEffect(()=>addMessage(schoolFeesTable,"bot-message"));
+    return;
+  }
+
+  /* NORMAL SEARCH (VISIBLE + HIDDEN) */
+  const result=fuse.search(text);
+  let answer="Sorry, I don't know that yet.";
+  if(result.length>0) answer=result[0].item.answer;
+
+  typingEffect(()=>addMessage(answer,"bot-message"));
+}
+
+/* ENTER KEY */
+userInput.addEventListener("keydown",e=>{
+  if(e.key==="Enter") sendMessage();
+});
+
+/* SHOW ONLY VISIBLE FAQ BUTTONS */
+faqButtonsData.forEach(faq=>{
+  const btn=document.createElement("button");
+  btn.textContent=faq.question;
+  btn.onclick=()=>sendMessage(faq.question);
+  faqButtons.appendChild(btn);
+});
+
+/* LOAD CHAT ON REFRESH */
+loadChat();
+
+</script>
+
+</body>
+</html>
